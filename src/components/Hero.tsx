@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useCallback, useMemo } from 'react';
-import { ArrowRight } from 'lucide-react';
+import React, { useEffect, useRef, useCallback, useMemo, useState } from 'react';
+import { ArrowRight, Sparkles, Zap, Brain, Rocket } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface GradientLayer {
@@ -30,6 +30,8 @@ const Hero = () => {
   const timeRef = useRef(0);
   const lastFrameTime = useRef(0);
   const isVisible = useRef(true);
+  const [isHovered, setIsHovered] = useState(false);
+  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
 
   // Performance monitoring
   const performanceConfig = useMemo(() => ({
@@ -68,6 +70,11 @@ const Hero = () => {
       x: e.clientX - rect.left,
       y: e.clientY - rect.top
     };
+    
+    setMousePosition({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    });
   }, []);
 
   useEffect(() => {
@@ -99,129 +106,96 @@ const Hero = () => {
       const particleCount = window.innerWidth < 768 ? 50 : window.innerWidth < 1200 ? 100 : 150;
 
       for (let i = 0; i < particleCount; i++) {
-        const angle = Math.random() * Math.PI * 2;
-        
-        // Calculate distance to reach any corner of the screen
-        const maxDistance = Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height) / 2;
-        const distance = 200 + Math.random() * maxDistance;
-        
-        let targetX = centerX + Math.cos(angle) * distance;
-        let targetY = centerY + Math.sin(angle) * distance;
-        
-        // Allow particles much closer to edges
-        targetX = Math.max(20, Math.min(canvas.width - 20, targetX));
-        targetY = Math.max(20, Math.min(canvas.height - 20, targetY));
+        // Randomly distribute particles across the canvas
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
 
         const particle: Particle = {
-          x: centerX,
-          y: centerY,
-          baseX: targetX,
-          baseY: targetY,
-          vx: Math.cos(angle) * (4 + Math.random() * 6), // Increased initial velocity
-          vy: Math.sin(angle) * (4 + Math.random() * 6),
-          size: 1.5 + Math.random() * 4, // More size variation for different star sizes
-          opacity: 0,
-          phase: 'exploding',
-          explosionTarget: { x: targetX, y: targetY }
+          x: x,
+          y: y,
+          baseX: x,
+          baseY: y,
+          vx: 0,
+          vy: 0,
+          size: 1.5 + Math.random() * 3,
+          opacity: 0.3 + Math.random() * 0.5,
+          phase: 'floating',
+          explosionTarget: { x: centerX, y: centerY }
         };
 
-        // Pre-create gradients for this particle to avoid recreation every frame
+        // Pre-create gradients for this particle
         particle.gradients = createParticleGradients(ctx, particle.size);
         
         particles.current.push(particle);
       }
     };
 
-    // Animation loop with performance monitoring
-    const animate = (currentTime: number) => {
-      if (!isVisible.current) {
+    // Animation loop
+    const animate = () => {
+      const currentTime = performance.now();
+      const deltaTime = currentTime - lastFrameTime.current;
+      
+      // Cap at 60 FPS for smooth animation
+      if (deltaTime < 16.67) {
         animationRef.current = requestAnimationFrame(animate);
         return;
       }
-
-      // FPS throttling
-      if (currentTime - lastFrameTime.current < 1000 / performanceConfig.targetFPS) {
-        animationRef.current = requestAnimationFrame(animate);
-        return;
-      }
+      
       lastFrameTime.current = currentTime;
+      timeRef.current += deltaTime * 0.001; // Convert to seconds
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      timeRef.current += 0.016; // ~60fps
 
       particles.current.forEach((particle) => {
-        if (particle.phase === 'exploding') {
-          // Explosion phase - move towards target
-          particle.x += particle.vx;
-          particle.y += particle.vy;
-          particle.vx *= 0.99; // Decelerate
-          particle.vy *= 0.99;
-          particle.opacity = Math.min(0.8, particle.opacity + 0.03);
-
-          // Check if reached target or time elapsed
-          const distToTarget = Math.sqrt(
-            Math.pow(particle.x - particle.explosionTarget.x, 2) + 
-            Math.pow(particle.y - particle.explosionTarget.y, 2)
-          );
-
-          if (distToTarget < 30 || timeRef.current > 5) {
-            particle.phase = 'floating';
-            particle.baseX = particle.x;
-            particle.baseY = particle.y;
-            particle.vx = 0;
-            particle.vy = 0;
-          }
-        } else {
-          // Floating phase with mouse repulsion
-          const mouse = mouseRef.current;
+        // Floating phase with mouse repulsion
+        const mouse = mouseRef.current;
+        
+        // Calculate distance to mouse
+        const dx = particle.x - mouse.x;
+        const dy = particle.y - mouse.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const repelRadius = 120;
+        
+        if (distance < repelRadius && distance > 0) {
+          // Calculate gentle repulsion force with smooth falloff
+          const force = Math.pow((repelRadius - distance) / repelRadius, 3);
+          const repelStrength = 0.8;
           
-          // Calculate distance to mouse
-          const dx = particle.x - mouse.x;
-          const dy = particle.y - mouse.y;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-          const repelRadius = 120;
-          
-          if (distance < repelRadius && distance > 0) {
-            // Calculate gentle repulsion force with smooth falloff
-            const force = Math.pow((repelRadius - distance) / repelRadius, 3);
-            const repelStrength = 0.8; // Increased from 0.3 to make it more noticeable
-            
-            // Apply smooth repulsion force
-            particle.vx += (dx / distance) * force * repelStrength;
-            particle.vy += (dy / distance) * force * repelStrength;
-          }
-          
-          // Add very gentle floating motion using unique particle seeds
-          const floatSeedX = particle.baseX * 0.001;
-          const floatSeedY = particle.baseY * 0.001;
-          const floatX = Math.sin(timeRef.current * 0.2 + floatSeedX) * 0.005; // Reduced further
-          const floatY = Math.cos(timeRef.current * 0.15 + floatSeedY) * 0.004; // Reduced further
-          
-          // Apply tiny floating forces
-          particle.vx += floatX;
-          particle.vy += floatY;
-          
-          // Apply gentle damping to gradually slow particles
-          particle.vx *= 0.997; // Reduced damping to allow mouse interaction to be more visible
-          particle.vy *= 0.997;
-          
-          // Update position
-          particle.x += particle.vx;
-          particle.y += particle.vy;
-          
-          // Screen wrapping instead of bouncing
-          if (particle.x < -10) particle.x = canvas.width + 10;
-          if (particle.x > canvas.width + 10) particle.x = -10;
-          if (particle.y < -10) particle.y = canvas.height + 10;
-          if (particle.y > canvas.height + 10) particle.y = -10;
+          // Apply smooth repulsion force
+          particle.vx += (dx / distance) * force * repelStrength;
+          particle.vy += (dy / distance) * force * repelStrength;
         }
+        
+        // Add very gentle floating motion using unique particle seeds
+        const floatSeedX = particle.baseX * 0.001;
+        const floatSeedY = particle.baseY * 0.001;
+        const floatX = Math.sin(timeRef.current * 0.2 + floatSeedX) * 0.005;
+        const floatY = Math.cos(timeRef.current * 0.15 + floatSeedY) * 0.004;
+        
+        // Apply tiny floating forces
+        particle.vx += floatX;
+        particle.vy += floatY;
+        
+        // Apply gentle damping to gradually slow particles
+        particle.vx *= 0.997;
+        particle.vy *= 0.997;
+        
+        // Update position
+        particle.x += particle.vx;
+        particle.y += particle.vy;
+        
+        // Screen wrapping instead of bouncing
+        if (particle.x < -10) particle.x = canvas.width + 10;
+        if (particle.x > canvas.width + 10) particle.x = -10;
+        if (particle.y < -10) particle.y = canvas.height + 10;
+        if (particle.y > canvas.height + 10) particle.y = -10;
 
         // Draw particle with optimized rendering
         ctx.save();
         
         const baseAlpha = particle.opacity;
         
-        // Use pre-created gradients if available, otherwise create optimized glow layers
+        // Use pre-created gradients if available
         if (particle.gradients) {
           // Draw glow layers with pre-created gradients
           particle.gradients.forEach(({ gradient, alpha, size }) => {
@@ -231,31 +205,16 @@ const Hero = () => {
             ctx.fillRect(-size, -size, size * 2, size * 2);
             ctx.translate(-particle.x, -particle.y);
           });
-        } else {
-          // Fallback: simplified glow layers without expensive gradient recreation
-          const glowLayers = [
-            { size: particle.size * 6, alpha: 0.05, color: '#6969b3' },
-            { size: particle.size * 3, alpha: 0.15, color: '#98c1d9' },
-            { size: particle.size * 1.5, alpha: 0.3, color: '#b8e0f5' }
-          ];
-          
-          glowLayers.forEach(layer => {
-            ctx.globalAlpha = baseAlpha * layer.alpha;
-            ctx.fillStyle = layer.color;
-            ctx.beginPath();
-            ctx.arc(particle.x, particle.y, layer.size, 0, Math.PI * 2);
-            ctx.fill();
-          });
         }
         
-        // Draw core without expensive shadow effects
+        // Draw core
         ctx.globalAlpha = baseAlpha;
         ctx.fillStyle = '#ffffff';
         ctx.beginPath();
         ctx.arc(particle.x, particle.y, particle.size * 0.8, 0, Math.PI * 2);
         ctx.fill();
         
-        // Simplified star rays without shadow
+        // Simplified star rays
         ctx.globalAlpha = baseAlpha * 0.6;
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 0.5;
@@ -277,7 +236,7 @@ const Hero = () => {
     };
 
     initParticles();
-    animationRef.current = requestAnimationFrame(animate);
+    animate();
 
     return () => {
       window.removeEventListener('resize', updateCanvasSize);
@@ -286,52 +245,194 @@ const Hero = () => {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [updateMousePosition, createParticleGradients, performanceConfig.targetFPS]);
-
-  // Add intersection observer to pause animation when component is not visible
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        isVisible.current = entry.isIntersecting;
-      },
-      { threshold: 0.1 }
-    );
-
-    const section = document.querySelector('[data-hero-section]');
-    if (section) {
-      observer.observe(section);
-    }
-
-    return () => {
-      if (section) {
-        observer.unobserve(section);
-      }
-    };
-  }, []);
+  }, [updateMousePosition, createParticleGradients]);
 
   return (
-    <section className="relative py-20 md:py-32 min-h-screen flex items-center justify-center bg-black overflow-hidden" data-hero-section>
+    <section 
+      className="relative min-h-screen flex items-center justify-center overflow-hidden bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      {/* Animated Canvas Background */}
       <canvas
         ref={canvasRef}
         className="absolute inset-0 pointer-events-none"
         style={{ zIndex: 1 }}
       />
-      
-      <div className="container mx-auto px-6 relative z-10">
-        <div className="max-w-4xl mx-auto text-center space-y-8">
-          <div className="space-y-6">
-            <h1 className="text-5xl md:text-7xl font-bold leading-tight floating-text glowing-text">
-              Hello, I'm Aravind Babu Somepalli
-            </h1>
-            <div className="text-2xl md:text-3xl font-mono text-primary floating-text-delayed">
-              Artificial Intelligence / Machine Learning Engineer
+
+      {/* Floating Icons with Crazy Animations */}
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute top-20 left-20 animate-bounce animation-delay-1000">
+          <Brain className="w-12 h-12 text-purple-400 opacity-60 animate-pulse" />
+        </div>
+        <div className="absolute top-32 right-32 animate-bounce animation-delay-2000">
+          <Zap className="w-10 h-10 text-blue-400 opacity-60 animate-pulse" />
+        </div>
+        <div className="absolute bottom-32 left-32 animate-bounce animation-delay-3000">
+          <Rocket className="w-14 h-14 text-pink-400 opacity-60 animate-pulse" />
+        </div>
+        <div className="absolute bottom-20 right-20 animate-bounce animation-delay-1000">
+          <Sparkles className="w-8 h-8 text-yellow-400 opacity-60 animate-pulse" />
+        </div>
+      </div>
+
+      {/* Glowing Orbs */}
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute top-1/4 left-1/4 w-32 h-32 bg-purple-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob"></div>
+        <div className="absolute top-3/4 right-1/4 w-40 h-40 bg-pink-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob animation-delay-2000"></div>
+        <div className="absolute bottom-1/4 left-1/3 w-24 h-24 bg-blue-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob animation-delay-4000"></div>
+      </div>
+
+      {/* Main Content */}
+      <div className="relative z-10 text-center px-6 max-w-6xl mx-auto">
+        {/* Animated Title */}
+        <div className="mb-8">
+          <h1 className="text-5xl md:text-7xl lg:text-8xl font-bold mb-6 leading-tight">
+            <span className="bg-gradient-to-r from-purple-400 via-pink-400 to-blue-400 bg-clip-text text-transparent animate-gradient-x">
+              Aravind Babu
+            </span>
+            <br />
+            <span className="text-white">
+              Somepalli
+            </span>
+          </h1>
+          
+          {/* Animated Subtitle */}
+          <div className="relative">
+            <h2 className="text-2xl md:text-3xl lg:text-4xl font-semibold text-gray-300 mb-4 animate-fade-in-up">
+              AI / Machine Learning Engineer
+            </h2>
+            <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 w-32 h-1 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full animate-pulse"></div>
+          </div>
+        </div>
+
+        {/* Animated Description */}
+        <p className="text-lg md:text-xl text-gray-300 mb-8 max-w-3xl mx-auto leading-relaxed animate-fade-in-up animation-delay-200">
+          Specializing in Large Language Models, Deep Learning, and scalable ML infrastructure. 
+          Building intelligent systems that transform how we interact with technology.
+        </p>
+
+        {/* Animated Buttons */}
+        <div className="flex flex-col sm:flex-row gap-4 justify-center items-center animate-fade-in-up animation-delay-400">
+          <Button 
+            size="lg" 
+            className="group bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white border-0 rounded-full px-8 py-6 text-lg font-semibold hover:scale-110 transition-all duration-300 hover:shadow-2xl hover:shadow-purple-500/50"
+            onMouseEnter={() => setIsHovered(true)}
+          >
+            <span className="mr-2">Explore My Work</span>
+            <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform duration-300" />
+          </Button>
+          
+          <Button 
+            variant="outline" 
+            size="lg" 
+            className="group border-2 border-purple-500 text-purple-400 hover:bg-purple-500 hover:text-white rounded-full px-8 py-6 text-lg font-semibold hover:scale-110 transition-all duration-300 backdrop-blur-sm bg-slate-900/50"
+          >
+            <span className="mr-2">Download Resume</span>
+            <Sparkles className="w-5 h-5 group-hover:rotate-180 transition-transform duration-500" />
+          </Button>
+        </div>
+
+        {/* Floating Stats */}
+        <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl mx-auto animate-fade-in-up animation-delay-600">
+          <div className="text-center group hover:scale-110 transition-transform duration-300">
+            <div className="text-3xl md:text-4xl font-bold text-purple-400 mb-2 group-hover:text-pink-400 transition-colors duration-300">
+              5+
             </div>
-            <p className="text-xl leading-relaxed max-w-3xl mx-auto text-muted-foreground floating-text opacity-90">
-              Transforming data into intelligence: I build and deploy large-scale AI/ML systems that drive real business value and innovation
-            </p>
+            <div className="text-gray-400">Years Experience</div>
+          </div>
+          <div className="text-center group hover:scale-110 transition-transform duration-300">
+            <div className="text-3xl md:text-4xl font-bold text-blue-400 mb-2 group-hover:text-cyan-400 transition-colors duration-300">
+              50+
+            </div>
+            <div className="text-gray-400">Projects Completed</div>
+          </div>
+          <div className="text-center group hover:scale-110 transition-transform duration-300">
+            <div className="text-3xl md:text-4xl font-bold text-pink-400 mb-2 group-hover:text-purple-400 transition-colors duration-300">
+              99%
+            </div>
+            <div className="text-gray-400">Success Rate</div>
           </div>
         </div>
       </div>
+
+      {/* Mouse Trail Effect */}
+      {isHovered && (
+        <div 
+          className="fixed w-4 h-4 bg-gradient-to-r from-purple-400 to-pink-400 rounded-full pointer-events-none z-50 animate-ping"
+          style={{
+            left: mousePosition.x - 8,
+            top: mousePosition.y - 8,
+            transition: 'all 0.1s ease-out'
+          }}
+        />
+      )}
+
+      {/* Custom CSS Animations */}
+      <style dangerouslySetInnerHTML={{
+        __html: `
+          @keyframes blob {
+            0% { transform: translate(0px, 0px) scale(1); }
+            33% { transform: translate(30px, -50px) scale(1.1); }
+            66% { transform: translate(-20px, 20px) scale(0.9); }
+            100% { transform: translate(0px, 0px) scale(1); }
+          }
+          
+          @keyframes gradient-x {
+            0%, 100% { background-size: 200% 200%; background-position: left center; }
+            50% { background-size: 200% 200%; background-position: right center; }
+          }
+          
+          @keyframes fade-in-up {
+            from { opacity: 0; transform: translateY(30px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+          
+          .animate-blob {
+            animation: blob 7s infinite;
+          }
+          
+          .animate-gradient-x {
+            animation: gradient-x 3s ease infinite;
+          }
+          
+          .animate-fade-in-up {
+            animation: fade-in-up 1s ease-out forwards;
+          }
+          
+          .animation-delay-100 {
+            animation-delay: 0.1s;
+          }
+          
+          .animation-delay-200 {
+            animation-delay: 0.2s;
+          }
+          
+          .animation-delay-400 {
+            animation-delay: 0.4s;
+          }
+          
+          .animation-delay-600 {
+            animation-delay: 0.6s;
+          }
+          
+          .animation-delay-1000 {
+            animation-delay: 1s;
+          }
+          
+          .animation-delay-2000 {
+            animation-delay: 2s;
+          }
+          
+          .animation-delay-3000 {
+            animation-delay: 3s;
+          }
+          
+          .animation-delay-4000 {
+            animation-delay: 4s;
+          }
+        `
+      }} />
     </section>
   );
 };
